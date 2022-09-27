@@ -19,8 +19,10 @@
 # 2018.11.07
 
 import tensorflow as tf
+tf.compat.v1.disable_eager_execution()
 import numpy as np
 import os, glob
+os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
 
 class Homogenus_infer(object):
 
@@ -39,19 +41,18 @@ class Homogenus_infer(object):
 
 
         if sess is None:
-            self.sess = tf.Session()
+            self.sess = tf.compat.v1.Session()
         else:
             self.sess = sess
 
         # Load graph.
-        self.saver = tf.train.import_meta_graph(self.best_model_fname+'.meta')
-        self.graph = tf.get_default_graph()
+        self.saver = tf.compat.v1.train.import_meta_graph(self.best_model_fname+'.meta')
+        self.graph = tf.compat.v1.get_default_graph()
         self.prepare()
 
     def prepare(self):
         print('Restoring checkpoint %s..' % self.best_model_fname)
         self.saver.restore(self.sess, self.best_model_fname)
-
 
     def predict_genders(self, images_indir, openpose_indir, images_outdir=None, openpose_outdir=None):
 
@@ -69,11 +70,11 @@ class Homogenus_infer(object):
         import os, sys
         import json
 
-        from homogenus.tools.image_tools import put_text_in_image, fontColors, read_prep_image, save_images
-        from homogenus.tools.body_cropper import cropout_openpose, should_accept_pose
+        from homogenus.homogenus.tools.image_tools import put_text_in_image, fontColors, read_prep_image, save_images, cropout_openpose
+        from homogenus.homogenus.tools.body_cropper import should_accept_pose
 
         import cv2
-        from homogenus.tools.omni_tools import makepath
+        from homogenus.homogenus.tools.omni_tools import makepath
         import glob
 
         sys.stdout.write('\nRunning homogenus on --images_indir=%s --openpose_indir=%s\n'%(images_indir, openpose_indir))
@@ -155,6 +156,44 @@ class Homogenus_infer(object):
         if images_outdir is not None:
             sys.stdout.write('Dumped overlayed images at %s'%images_outdir)
         sys.stdout.write('Dumped gendered openpose keypoints at %s'%openpose_outdir)
+
+    def predict_gender_one_img(self, img_dir, keypoints_dir):
+        import json, cv2
+        # from homogenus.homogenus.tools.body_cropper import should_accept_pose
+        from homogenus.homogenus.tools.image_tools import read_prep_image, cropout_openpose
+
+        Iph = self.graph.get_tensor_by_name(u'input_images:0')
+
+        probs_op = self.graph.get_tensor_by_name(u'probs_op:0')
+        accept_threshold = 0.9
+        crop_margin = 0.08
+
+        with open(keypoints_dir, 'r') as f:
+            pose_data = json.load(f)
+
+        for opnpose_pIdx in range(1):
+            pose_data['people'][opnpose_pIdx]['gender_pd'] = 'neutral'
+
+            pose = np.asarray(pose_data['people'][opnpose_pIdx]['pose_keypoints_2d']).reshape(-1, 3)
+
+            crop_info = cropout_openpose(img_dir, pose, want_image=True, crop_margin=crop_margin)
+            cropped_image = crop_info['cropped_image']
+
+            if cropped_image.shape[0] < 200 or cropped_image.shape[1] < 200:
+                continue
+
+            img = read_prep_image(cropped_image)[np.newaxis]
+
+            probs_ob = self.sess.run(probs_op, feed_dict={Iph: img})[0]
+            gender_id = np.argmax(probs_ob, axis=0)
+
+            gender_prob = probs_ob[gender_id]
+            gender_pd = 'male' if gender_id == 0 else 'female'
+
+            if gender_prob <= accept_threshold:
+                gender_pd = 'neutral'
+
+            return gender_pd
 
 
 
