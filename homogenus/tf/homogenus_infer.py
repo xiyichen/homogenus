@@ -165,7 +165,7 @@ class Homogenus_infer(object):
         Iph = self.graph.get_tensor_by_name(u'input_images:0')
 
         probs_op = self.graph.get_tensor_by_name(u'probs_op:0')
-        accept_threshold = 0.9
+        accept_threshold = 0.6
         crop_margin = 0.08
 
         with open(keypoints_dir, 'r') as f:
